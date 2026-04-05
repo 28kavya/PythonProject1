@@ -1,14 +1,17 @@
+import os
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 from flask import Flask, request, jsonify
 import tensorflow_hub as hub
 import librosa
 import numpy as np
 import whisper
-import os
 import uuid
-
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
 import tensorflow as tf
+import logging
+logging.getLogger("tensorflow").setLevel(logging.ERROR)
+
 tf.get_logger().setLevel('ERROR')
 
 app = Flask(__name__)
@@ -89,7 +92,12 @@ def analyze():
         return jsonify({
             "alert_triggered": alert_triggered,
             "alert_reason": alert_reason,
-            "overall_risk_level": overall_risk_level
+            "overall_risk_level": overall_risk_level,
+            "amplitude": amplitude,
+            "text": text,
+            "text_danger": text_danger,
+            "yamnet_detected": ai_detected,
+            "yamnet_predictions": yamnet_labels
         })
 
     except Exception as e:
@@ -98,10 +106,10 @@ def analyze():
             "details": str(e)
         }), 500
 
-    # finally:
-    #     # ✅ Cleanup file
-    #     if os.path.exists(file_path):
-    #         os.remove(file_path)
+    finally:
+        # ✅ Cleanup file
+        if os.path.exists(file_path):
+            os.remove(file_path)
 
 
 if __name__ == "__main__":
