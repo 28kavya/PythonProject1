@@ -10,37 +10,50 @@ import whisper
 import uuid
 import tensorflow as tf
 import logging
-logging.getLogger("tensorflow").setLevel(logging.ERROR)
 
+logging.getLogger("tensorflow").setLevel(logging.ERROR)
 tf.get_logger().setLevel('ERROR')
 
 app = Flask(__name__)
 
-# Load YAMNet
-print("Loading YAMNet...")
-yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
-class_map_path = yamnet_model.class_map_path().numpy()
-class_names = [line.strip().split(",")[-1] for line in open(class_map_path)]
-print("YAMNet loaded!")
-
-# Load Whisper
-print("Loading Whisper...")
-whisper_model = whisper.load_model("base")
-print("Whisper loaded!")
+# 🔥 GLOBAL VARIABLES (lazy loading)
+yamnet_model = None
+class_names = None
+whisper_model = None
 
 danger_keywords = ["scream", "shout", "yell", "cry", "help", "attack", "follow", "scared", "save me"]
+
+
+# ✅ Lazy load YAMNet
+def load_yamnet():
+    global yamnet_model, class_names
+    if yamnet_model is None:
+        print("Loading YAMNet...")
+        yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
+        class_map_path = yamnet_model.class_map_path().numpy()
+        class_names = [line.strip().split(",")[-1] for line in open(class_map_path)]
+        print("YAMNet loaded!")
+    return yamnet_model, class_names
+
+
+# ✅ Lazy load Whisper
+def load_whisper():
+    global whisper_model
+    if whisper_model is None:
+        print("Loading Whisper...")
+        whisper_model = whisper.load_model("base")
+        print("Whisper loaded!")
+    return whisper_model
 
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
 
-    # ✅ Check file
     if 'file' not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
 
     file = request.files['file']
 
-    # ✅ Save with unique name (avoid overwrite)
     filename = str(uuid.uuid4()) + ".wav"
     file_path = os.path.join("uploads", filename)
 
@@ -48,7 +61,11 @@ def analyze():
     file.save(file_path)
 
     try:
-        # 🔊 YAMNet
+        # 🔥 Load models ONLY when needed
+        yamnet_model, class_names = load_yamnet()
+        whisper_model = load_whisper()
+
+        # 🔊 YAMNet processing
         waveform, sr = librosa.load(file_path, sr=16000)
         scores, embeddings, spectrogram = yamnet_model(waveform)
 
@@ -71,13 +88,11 @@ def analyze():
 
         amplitude = float(np.max(np.abs(waveform)))
 
-        # 🧠 Whisper
+        # 🧠 Whisper processing
         result = whisper_model.transcribe(file_path)
         text = result["text"].lower()
 
-        # 🚨 Text danger detection
         text_danger = any(word in text for word in danger_keywords)
-        print(text_danger)
 
         # ⚖️ Decision logic
         if (ai_detected and amplitude > 0.25) or text_danger:
@@ -107,11 +122,11 @@ def analyze():
         }), 500
 
     finally:
-        # ✅ Cleanup file
         if os.path.exists(file_path):
             os.remove(file_path)
 
 
+# ✅ Required for local run (Render uses Gunicorn)
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
