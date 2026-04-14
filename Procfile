@@ -1,1 +1,0 @@
-web gunicorn yamnet_service.py
