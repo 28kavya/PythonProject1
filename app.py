@@ -4,7 +4,6 @@ import numpy as np
 import re
 
 from fastapi import FastAPI, UploadFile, File
-from contextlib import asynccontextmanager
 
 # ✅ IMPORTANT: set cache BEFORE imports
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -18,6 +17,7 @@ import tensorflow_hub as hub
 import librosa
 import whisper
 
+# ✅ Create app (NO lifespan, NO startup loading)
 app = FastAPI()
 
 # 🔥 Lazy loaded models
@@ -35,7 +35,7 @@ def load_models():
     global yamnet_model, whisper_model, class_names
 
     if yamnet_model is None:
-        print("Loading YAMNet...")
+        print("🔥 Loading YAMNet...")
         yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
 
         class_map_path = yamnet_model.class_map_path().numpy()
@@ -43,12 +43,12 @@ def load_models():
             line.strip().split(",")[-1].strip().strip('"')
             for line in open(class_map_path)
         ]
-        print("YAMNet loaded!")
+        print("✅ YAMNet loaded!")
 
     if whisper_model is None:
-        print("Loading Whisper...")
+        print("🔥 Loading Whisper...")
         whisper_model = whisper.load_model("tiny", download_root="/tmp/whisper")
-        print("Whisper loaded!")
+        print("✅ Whisper loaded!")
 
 # ✅ Keyword detection
 def contains_danger_keyword(text, keywords):
@@ -62,34 +62,39 @@ def contains_danger_keyword(text, keywords):
                 return True
     return False
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("🔥 Loading models at startup...")
-    load_models()
-    yield
-
-# ✅ create app AFTER lifespan
-app = FastAPI(lifespan=lifespan)
-
+# ✅ Health check (IMPORTANT for Render)
 @app.get("/")
 def home():
     return {"status": "AI backend running 🚀"}
 
+# ✅ Optional warmup API
+@app.get("/warmup")
+def warmup():
+    load_models()
+    return {"status": "models loaded"}
+
+# ✅ Main API
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
     print("🔥 /analyze API HIT")
-    os.makedirs("uploads", exist_ok=True)  # ✅ ensure folder exists
+
+    os.makedirs("uploads", exist_ok=True)
+
     file_ext = file.filename.split(".")[-1]
     file_path = f"uploads/{uuid.uuid4()}.{file_ext}"
 
     try:
-        # Save file
+        # ✅ Save file
         with open(file_path, "wb") as f:
             f.write(await file.read())
 
+        # ✅ Load models (lazy)
         load_models()
 
+        # ✅ Load audio
         waveform, sr = librosa.load(file_path, sr=16000)
+
+        # ✅ YAMNet prediction
         scores, embeddings, spectrogram = yamnet_model(waveform)
 
         scores_np = scores.numpy()
@@ -111,16 +116,19 @@ async def analyze(file: UploadFile = File(...)):
             if any(word in label for word in ["scream", "shout", "yell", "cry"]) and score > 0.15:
                 ai_detected = True
 
+        # ✅ Amplitude check
         amplitude = float(np.max(np.abs(waveform)))
 
         text = ""
         text_danger = False
 
+        # ✅ Whisper transcription
         if ai_detected or amplitude > 0.2:
             result = whisper_model.transcribe(file_path)
             text = result["text"]
             text_danger = contains_danger_keyword(text, danger_keywords)
 
+        # ✅ Final decision
         if (ai_detected and amplitude > 0.25) or text_danger:
             overall_risk_level = "HIGH"
             alert_triggered = True
