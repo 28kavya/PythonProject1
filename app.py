@@ -4,7 +4,7 @@ import numpy as np
 import re
 
 from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
 
 # ✅ IMPORTANT: set cache BEFORE imports
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -62,6 +62,14 @@ def contains_danger_keyword(text, keywords):
                 return True
     return False
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("🔥 Loading models at startup...")
+    load_models()
+    yield
+
+# ✅ create app AFTER lifespan
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
 def home():
@@ -69,8 +77,10 @@ def home():
 
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
+    print("🔥 /analyze API HIT")
     os.makedirs("uploads", exist_ok=True)  # ✅ ensure folder exists
-    file_path = f"uploads/{uuid.uuid4()}.wav"
+    file_ext = file.filename.split(".")[-1]
+    file_path = f"uploads/{uuid.uuid4()}.{file_ext}"
 
     try:
         # Save file
